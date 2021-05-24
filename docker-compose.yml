@@ -1,0 +1,33 @@
+version: '3'
+
+services:
+  node1:
+    build: .
+    container_name: node1
+    tty: true
+    volumes:
+      - ./:/usr/home/lectou
+    working_dir: /usr/home/lectou
+    networks:
+      net:
+        ipv4_address: 172.20.0.2
+
+  node2:
+    build: .
+    container_name: node2
+    tty: true
+    volumes:
+      - ./:/usr/home/lectou
+    working_dir: /usr/home/lectou
+    networks:
+      net:
+        ipv4_address: 172.20.0.3
+
+networks:
+  net:
+    name: net
+    driver: bridge
+    ipam:
+      driver: default
+      config:
+        - subnet: 172.20.0.0/24
