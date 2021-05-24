@@ -2,19 +2,26 @@ from enum import Enum
 from struct import *
 
 class ToUPacket:
-    def __init__(flag, src_host=None, src_port=None, dst_host=None, dst_port=None):
+    def __init__(self, flag, 
+                src_host='0.0.0.0', src_port=0, 
+                dst_host='0.0.0.0', dst_port=0, 
+                seq=0, ack=0,
+                window=0,
+                checksum=0,
+                data=None):
         self.src_host = src_host
         self.src_port = src_port
         self.dst_host = dst_host
         self.dst_port = dst_port
         self.flag = flag
-        self.ack = 0
-        self.seq = 0
-        self.window = 0
-        self.checksum = 0
+        self.ack = ack
+        self.seq = seq
+        self.window = window
+        self.checksum = checksum
+        self.data = data 
 
     def build(self):
-        packet = pack(
+        hdr = pack(
             '!HHIIBBHHH',
             self.src_port,
             self.dst_port,
@@ -24,8 +31,40 @@ class ToUPacket:
             self.flag,
             self.window,
             self.checksum,
-            0
+            0,
         )
+        if self.data is not None:
+            return hdr + self.data.encode()
+        return hdr 
+
+    def show(self):
+        print("----- tou packet -----")
+        print("src_port: ", self.src_port)
+        print("dst_port: ", self.dst_port)
+        print("flag: ", self.flag)
+        print("seq: ", self.seq)
+        print("ack: ", self.ack)
+        print("window: ", self.window)
+        print("checksum: ", self.checksum)
+        # print("data len: ", len(self.data))
+
+def parse_packet(data):
+    hdr_data = data[:20]
+    hdr = unpack(
+        '!HHIIBBHHH',
+        hdr_data
+    )
+    data = data[20:]
+    return ToUPacket(
+        src_port=hdr[0],
+        dst_port=hdr[1],
+        seq=hdr[2],
+        ack=hdr[3],
+        flag=hdr[5],
+        window=hdr[6],
+        checksum=hdr[7],
+        data=data
+    )
 
 class Flag(Enum):
     FIN = 0x01
