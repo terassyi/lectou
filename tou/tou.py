@@ -1,4 +1,5 @@
 import socket
+import time
 from enum import Enum
 from tou import *
 import packet as tou_packet
@@ -13,10 +14,31 @@ class ToUSocket():
         self.state = State.CLOSED
 
     def recv(self, buffer_size):
-        pass
+        print("[DEBUG] recv")
+        if not self._is_established():
+            raise ConnectionError
+        packet, _ = self._recv_packet()
+        if packet.flag is not tou_packet.Flag.ACK.value:
+            self._send_packet(tou_packet.Flag.RST.value)
+        
+        data = packet.data
+
+        self._send_packet(tou_packet.Flag.ACK.value)
+        return data
 
     def send(self, data):
-        pass
+        if not self._is_established():
+            raise ConnectionError
+        print("[DEBUG] send: ", data)
+        self._send_packet(tou_packet.Flag.ACK.value, data)
+
+        # wait ack
+        packet, _ = self._recv_packet()
+        if packet.flag is tou_packet.Flag.ACK.value:
+            return 
+        else:
+            self._send_packet(tou_packet.Flag.RST.value)
+            raise ConnectionRefusedError
 
     def _is_established(self):
         return self.state is State.ESTABLISHED
@@ -31,30 +53,21 @@ class ToUSocket():
         print("[INFO] SYN_SENT")
 
         packet, _ = self._recv_packet()
-        print("hogehoge")
         if packet.flag is tou_packet.Flag.SYN + tou_packet.Flag.ACK:
             self._send_packet(tou_packet.Flag.ACK.value)
-            self.state = State.SYN_RECVD
-            print("[INFO] SYN_RCVD")
             
         else:
             self._send_packet(tou_packet.Flag.RST.value)
             raise ConnectionRefusedError
             return
         
-        packet, _ = self._recv_packet()
-        if packet.flag is tou_packet.Flag.ACK.value:
-            self.state = State.ESTABLISHED
-            print("[INFO] ESTAB")
-            return 
-        else:
-            self._send_packet(tou_packet.Flag.RST.value)
-            raise ConnectionRefusedError
-            return
+        self.state = State.ESTABLISHED
+        print("[INFO] ESTAB")
+        return self
+        
 
 
     def bind(self, host):
-        print("[DEBUG] bind")
         self.host_addr = host[0]
         self.host_port = host[1]
         self.inner_socket.bind(host)
@@ -79,25 +92,81 @@ class ToUSocket():
             raise ConnectionRefusedError
             return
 
-        self._send_packet(tou_packet.Flag.ACK.value)
-        self.state = State.ESTABLISHED
-        print("[INFO] ESTAB")
+        packet, _ = self._recv_packet()
+        if packet.flag is tou_packet.Flag.ACK.value:
+            self.state = State.ESTABLISHED
+            print("[INFO] ESTAB")
+            
+        else:
+            self._send_packet(tou_packet.Flag.RST.value)
+            raise ConnectionRefusedError
+            return
 
         return self
 
+    def active_close(self):
+        if not self._is_established():
+            raise ConnectionError
+        
+        self._send_packet(tou_packet.Flag.FIN + tou_packet.Flag.ACK)
+        self.state = State.FIN_WAIT1
+        print("[INFO] FIN_WAIT1")
+
+        # ack of fin
+        packet, _ = self._recv_packet()
+        if packet.flag is not tou_packet.Flag.ACK.value:
+            self._send_packet(tou_packet.Flag.RST.value)
+            print("[ERROR] ack of fin is not found")
+            raise ConnectionError
+        
+        self.state = State.FIN_WAIT2
+        print("[INFO] FIN_WAIT2")
+        
+        # fin
+        packet, _ = self._recv_packet()
+        if packet.flag is not tou_packet.Flag.FIN + tou_packet.Flag.ACK:
+            print("[ERROR] fin|ack is not found (active close)")
+            raise ConnectionError
+        
+        self.state = State.TIME_WAIT
+        print("[INFO] TIME_WAIT")
+        self._send_packet(tou_packet.Flag.ACK.value)
+        self._timer()
+        
+        self.state = State.CLOSED
+        print("[INFO] CLOSED")
+
+
+    def passive_close(self):
+        packet, _ = self._recv_packet()
+        if packet.flag is not tou_packet.Flag.FIN + tou_packet.Flag.ACK:
+            print("[ERROR] fin is not set (passive close)")
+            raise ConnectionError
+        
+        self.state = State.CLOSE_WAIT
+        self._send_packet(tou_packet.Flag.ACK.value)
+
+        self.state = State.LAST_ACK
+        self._send_packet(tou_packet.Flag.FIN + tou_packet.Flag.ACK)
+
+        self.state = State.CLOSED
+        print("[INFO] CLOSED")
+
+    def _timer(self):
+        time.sleep(20)
+
     def _send_packet(self, flag, data=None):
-        packet = tou_packet.ToUPacket(flag, data)
-        print("[DEBUG] _send_packet")
+        packet = tou_packet.ToUPacket(flag, data=data)
         packet.show()
-        data = packet.build()
-        self.inner_socket.sendto(data, (self.peer_addr, self.peer_port))
-        return len(data)
+        p = packet.build()
+        self.inner_socket.sendto(p, (self.peer_addr, self.peer_port))
+        return len(p)
 
     def _recv_packet(self):
         data, peer = self.inner_socket.recvfrom(1024)
         packet = tou_packet.parse_packet(data)
-        print("[DEBUG] _recv_packet")
         return packet, peer
+
 
 class ToU:
     def __init__(self,peer_addr='0.0.0.0', peer_port=0, host_addr='0.0.0.0', host_port=0):

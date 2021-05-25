@@ -34,7 +34,7 @@ class ToUPacket:
             0,
         )
         if self.data is not None:
-            return hdr + self.data.encode()
+            return hdr + self.data
         return hdr 
 
     def show(self):
